@@ -1,6 +1,8 @@
 # minesweeper
 Minesweeper by löve
 
+<p align="center"><img src="assets/images/gamescreen.png" alt="minesweeper"/></p>
+
 ## TODO
   - Добавить ui систему
   - Добавить счётчик флажков
