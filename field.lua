@@ -1,31 +1,24 @@
-local ModeMinesweeper = require("mode")
+local States = require("states")
 local Cell = require("cell")
 
 local Field = {}
 
-Field.GameStatus = {
-  start = 0,
-  dead = 1,
-  process = 2,
-  win = 3,
-}
-
 function Field.sizeFromMode(mode)
-  if mode == ModeMinesweeper.Status.begginer then
+  if mode == States.GameMode.begginer then
     return 9, 9
-  elseif mode == ModeMinesweeper.Status.intermediate then
+  elseif mode == States.GameMode.intermediate then
     return 16, 16
-  elseif mode == ModeMinesweeper.Status.expert then
+  elseif mode == States.GameMode.expert then
     return 30, 16
   end
 end
 
 function Field.minesCountFromMode(mode)
-  if mode == ModeMinesweeper.Status.begginer then
+  if mode == States.GameMode.begginer then
     return 10
-  elseif mode == ModeMinesweeper.Status.intermediate then
+  elseif mode == States.GameMode.intermediate then
     return 40
-  elseif mode == ModeMinesweeper.Status.expert then
+  elseif mode == States.GameMode.expert then
     return 99
   end
 end
@@ -52,7 +45,7 @@ function Field.new(mode)
   local visitedCells = 0
 
   local self = {
-    gameStatus = Field.GameStatus.start,
+    gameStatus = States.GameStatus.start,
     width = width,
     height = height,
     minesCount = totalMinesCount,
@@ -65,7 +58,7 @@ function Field.new(mode)
       local x = love.math.random(1, self.width)
       local y = love.math.random(1, self.height)
 
-      if not self.cells[x][y].isMine 
+      if not self.cells[x][y].isMine
         and not (mx == x and my == y) then
         self.cells[x][y].isMine = true
         minesPlaced = minesPlaced + 1
@@ -73,34 +66,58 @@ function Field.new(mode)
     end
   end
 
-  function self:walkAround(dx, dy, f)
-    for x = dx-1, dx+1 do
-      for y = dy-1, dy+1 do
+  function self:walkAround(dx, dy)
+    local x, y = dx-1, dy-2
+
+    return function()
+      while true do
+        if y < dy+1 then
+          y = y + 1
+        else
+          x = x + 1
+          y = dy-1
+        end
+
+        if x > dx+1 then
+          return nil
+        end
+
         if self.cells[x]
-          and self.cells[x][y] 
+          and self.cells[x][y]
           and not (dx == x and dy == y) then
-            f(self.cells[x][y], x, y)
+            return self.cells[x][y], x, y
         end
       end
     end
   end
 
-  function self:walkField(f)
-    for x = 1, self.width do
-      for y = 1, self.height do
-        f(self.cells[x][y], x, y)
+  function self:walkField()
+    local x, y = 1, 0
+
+    return function()
+      if y < self.height then
+        y = y + 1
+      else
+        x = x + 1
+        y = 1
       end
+
+      if x > self.width then
+        return nil
+      end
+
+      return self.cells[x][y], x, y
     end
   end
 
   function self:countMinesAround(dx, dy)
     local count = 0
 
-    self:walkAround(dx, dy, function(cell)
+    for cell in self:walkAround(dx, dy) do
       if cell.isMine == true then
         count = count + 1
       end
-    end)
+    end
 
     return count
   end
@@ -108,11 +125,11 @@ function Field.new(mode)
   function self:countFlagsAround(dx, dy)
     local count = 0
 
-    self:walkAround(dx, dy, function(cell)
+    for cell in self:walkAround(dx, dy) do
       if cell:isFlag() == true then
         count = count + 1
       end
-    end)
+    end
 
     return count
   end
@@ -134,7 +151,7 @@ function Field.new(mode)
   end
   
   function self:revealAround(dx, dy)
-    local revealCell = function(cell, x, y)
+    for cell, x, y in self:walkAround(dx, dy) do
       if cell:isEmpty() then
         self:visitToOpen(cell)
         self:revealAround(x, y)
@@ -142,24 +159,60 @@ function Field.new(mode)
         self:visitToNumber(cell)
       end
     end
-
-    self:walkAround(dx, dy, revealCell)
   end
 
-  -- TODO
+  function self:isDeadAccord(dx, dy)
+    for cell in self:walkAround(dx, dy) do
+      if cell.isMine and not cell:isFlag() then
+        return true
+      end
+    end
+
+    return false
+  end
+
   function self:openAround(dx, dy)
-    self:walkAround(dx, dy, function(cell, x, y)
-      self:mousepressed(x, y, 1)
-    end)
+    local isDead = self:isDeadAccord(dx, dy)
+
+    if isDead then
+      self.gameStatus = States.GameStatus.dead
+      self:showAllMines()
+    end
+
+    for cell, x, y in self:walkAround(dx, dy) do
+      if cell:isFlag() then
+        if isDead and not cell.isMine then
+          cell:toDeadFlag()
+        end
+        goto continue
+      end
+
+      if isDead and cell.isMine then
+        cell:toDeadMine()
+        goto continue
+      end
+
+      if not isDead then
+        if cell:isNumber() then
+          self:visitToNumber(cell)
+        elseif cell:isClose() then
+          self:visitToOpen(cell)
+          self:revealAround(x, y)
+        end
+
+        self:checkWin()
+      end
+
+      ::continue::
+    end
   end
 
   -- TODO
   -- Сделать когда будет разделение отжания и нажатия кнопки
   function self:highlightAround(dx, dy) end
 
-  -- TODO не работает openAround
   function self:accord(dx, dy)
-    local count = self.cells[dx][y].number
+    local count = self.cells[dx][dy].number
     local flagsCount = self:countFlagsAround(dx,dy)
     if count == flagsCount then
       self:openAround(dx,dy)
@@ -169,41 +222,79 @@ function Field.new(mode)
   end
 
   function self:showAllMines()
-    self:walkField(function(cell)
+    for cell in self:walkField() do
       if cell.isMine
+        and not cell:isFlag()
         and not cell:isDeadMine() then
-        cell:toMine()
+          cell:toMine()
       end
-    end)
+    end
   end
 
   function self:initNumbers()
-    self:walkField(function(cell, x, y)
+    for cell, x, y in self:walkField() do
       if not cell.isMine then
         local minesCount = self:countMinesAround(x, y)
         if minesCount > 0 then
           cell.number = minesCount
         end
       end
-    end)
+    end
   end
 
   function self:checkWin()
     if visitedCells == visitedToWinCount then
-      self.gameStatus = Field.GameStatus.win
+      self.gameStatus = States.GameStatus.win
+
+      for cell in self:walkField() do
+        if cell.isMine then
+          cell:toFlag()
+        end
+      end
     end
   end
-   
-  -- [[ external ]] --
 
-  function self:mousepressed(mx, my, button)
-    if self.gameStatus == Field.GameStatus.start then
-      self:initMines(math.floor(mx / Cell.cellSize) + 1, math.floor(my / Cell.cellSize) + 1)
-      self:initNumbers()
-      self.gameStatus = Field.GameStatus.process
+  function self:leftClickCell(cell, x, y)
+    if cell:isFlag() then
+      return
     end
 
-    if self.gameStatus ~= Field.GameStatus.process then
+    if cell.isMine then
+      cell:toDeadMine()
+      self.gameStatus = States.GameStatus.dead
+      self:showAllMines()
+    elseif cell:isNumber() then
+      self:visitToNumber(cell)
+      self:accord(x, y)
+    elseif cell:isClose() then
+      self:visitToOpen(cell)
+      self:revealAround(x, y)
+    end
+
+    self:checkWin()
+  end
+
+  function self:rightClickCell(cell, x, y)
+    if cell:isClose() then
+      if self.minesCount > 0 then
+        cell:toFlag()
+        self.minesCount = self.minesCount - 1
+      end
+    elseif cell:isFlag() then
+      cell:toClose()
+        self.minesCount = self.minesCount + 1
+    end
+  end
+
+  function self:mousepressed(mx, my, button)
+    if self.gameStatus == States.GameStatus.start then
+      self:initMines(math.floor(mx / Cell.cellSize) + 1, 
+        math.floor(my / Cell.cellSize) + 1)
+      self:initNumbers()
+      self.gameStatus = States.GameStatus.process
+    end
+
+    if self.gameStatus ~= States.GameStatus.process then
       return
     end
 
@@ -213,45 +304,18 @@ function Field.new(mode)
 
     if fieldX >= 1 and fieldX <= self.width 
       and fieldY >= 1 and fieldY <= self.height then
-        if button == 1 then -- LKM
-          if cell:isFlag() then
-            return
-          end
-
-          if cell.isMine then
-            cell:toDeadMine()
-            self.gameStatus = Field.GameStatus.dead
-            self:showAllMines()
-          elseif cell:isNumber() then
-            self:visitToNumber(cell)
-            --self:accord(fieldX, fieldY)
-          elseif cell:isClose() then
-            self:visitToOpen(cell)
-            self:revealAround(fieldX, fieldY)
-          end
-
-          self:checkWin()
-        elseif button == 2 then -- RKM
-          -- кликаем на закрытую клетку
-          if cell:isClose() then
-            -- Клетка закрыта и есть флажки
-            if self.minesCount > 0 then
-              cell:toFlag()
-              self.minesCount = self.minesCount - 1
-            end
-          elseif cell:isFlag() then
-            -- Снимаем флаг
-            cell:toClose()
-              self.minesCount = self.minesCount + 1
-          end
+        if button == 1 then
+          self:leftClickCell(cell, fieldX, fieldY)
+        elseif button == 2 then
+          self:rightClickCell(cell, fieldX, fieldY)
         end
     end
   end
 
   function self:draw()
-    self:walkField(function(cell)
+    for cell in self:walkField() do
       cell:draw()
-    end)
+    end
   end
 
   return self

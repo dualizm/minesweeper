@@ -3,7 +3,7 @@ local Cell = {}
 Cell.BackgroundState = {
   open = 1, -- Клетка открыта
   close = 2, -- Клетка закрыта
-  dead = 3, -- Клетка содержит взорванную мину
+  dead = 3, -- Клетка содержит ошибку
 }
 
 Cell.ForegroundState = {
@@ -26,79 +26,81 @@ local spriteSheetBack, spriteSheetFront
 local quadsBack, quadsFront
 
 function Cell.load()
-  -- Загрузка спрайтов заднего плана
+  local loadQuads = function(height, width)
+    local res = {}
+    for y = 0, height - Cell.cellSize, Cell.cellSize do
+      for x = 0, width - Cell.cellSize, Cell.cellSize do
+        local quad = love.graphics.newQuad(x, y, Cell.cellSize, Cell.cellSize, width, height)
+        table.insert(res, quad)
+      end
+    end
+    return res
+  end
+
+  -- Задний спрайт
   spriteSheetBack = assets.graphics.cellSheetBack
   local sheetBackWidth, sheetBackHeight = spriteSheetBack:getDimensions()
+  quadsBack = loadQuads(sheetBackHeight, sheetBackWidth)
 
-  quadsBack = {}
-  for y = 0, sheetBackHeight - Cell.cellSize, Cell.cellSize do
-    for x = 0, sheetBackWidth - Cell.cellSize, Cell.cellSize do
-      local quad = love.graphics.newQuad(x, y, Cell.cellSize, Cell.cellSize, sheetBackWidth, sheetBackHeight)
-      table.insert(quadsBack, quad)
-    end
-  end
-
-  -- Загрузка спрайтов переднего плана
+  -- Передний спрайт
   spriteSheetFront = assets.graphics.cellSheetFront
   local sheetFrontWidth, sheetFrontHeight = spriteSheetFront:getDimensions()
-
-  quadsFront = {}
-  for y = 0, sheetFrontHeight - Cell.cellSize, Cell.cellSize do
-    for x = 0, sheetFrontWidth - Cell.cellSize, Cell.cellSize do
-      local quad = love.graphics.newQuad(x, y, Cell.cellSize, Cell.cellSize, sheetFrontWidth, sheetFrontHeight)
-      table.insert(quadsFront, quad)
-    end
-  end
+  quadsFront = loadQuads(sheetFrontHeight, sheetFrontWidth)
 end
 
 function Cell.new(x, y)
+  local currentBackground = Cell.BackgroundState.close
+  local currentForeground = Cell.ForegroundState.none
 
   local self = {
     x = x,
     y = y,
-    currentBackground = Cell.BackgroundState.close,
-    currentForeground = Cell.ForegroundState.none,
     isMine = false,
     number = Cell.ForegroundState.none,
   }
 
   function self:draw()
-    love.graphics.draw(spriteSheetBack, quadsBack[self.currentBackground], self.x, self.y)
+    love.graphics.draw(spriteSheetBack, quadsBack[currentBackground], self.x, self.y)
 
-    if self.currentForeground ~= Cell.ForegroundState.none then
-      love.graphics.draw(spriteSheetFront, quadsFront[self.currentForeground], self.x, self.y)
+    if currentForeground ~= Cell.ForegroundState.none then
+      love.graphics.draw(spriteSheetFront, quadsFront[currentForeground], self.x, self.y)
     end
   end
 
   -- state functions
   function self:toDeadMine()
-    self.currentBackground = Cell.BackgroundState.dead
-    self.currentForeground = Cell.ForegroundState.mine
+    currentBackground = Cell.BackgroundState.dead
+    currentForeground = Cell.ForegroundState.mine
+  end
+
+  function self:toDeadFlag()
+    currentBackground = Cell.BackgroundState.dead
+    currentForeground = Cell.ForegroundState.flag
   end
 
   function self:toNumber()
-    self.currentBackground = Cell.BackgroundState.open
-    self.currentForeground = self.number
+    currentBackground = Cell.BackgroundState.open
+    currentForeground = self.number
   end
 
   function self:toOpen()
-    self.currentBackground = Cell.BackgroundState.open
-    self.currentForeground = Cell.ForegroundState.none
+    currentBackground = Cell.BackgroundState.open
+    currentForeground = Cell.ForegroundState.none
   end
 
   function self:toMine()
-    self.currentBackground = Cell.BackgroundState.close
-    self.currentForeground = Cell.ForegroundState.mine
+    currentBackground = Cell.BackgroundState.close
+    currentForeground = Cell.ForegroundState.mine
   end
 
   function self:toFlag()
-    self.currentBackground = Cell.BackgroundState.close
-    self.currentForeground = Cell.ForegroundState.flag
+    currentBackground = Cell.BackgroundState.close
+    currentForeground = Cell.ForegroundState.flag
   end
 
   function self:toClose()
-    self.currentBackground = Cell.BackgroundState.close
-    self.currentForeground = Cell.ForegroundState.none
+    currentBackground = Cell.BackgroundState.close
+    currentForeground = Cell.ForegroundState.none
   end
 
   -- predicate functions
@@ -107,34 +109,30 @@ function Cell.new(x, y)
   end
 
   function self:isOpen()
-    return self.currentBackground ~= Cell.BackgroundState.close
+    return currentBackground ~= Cell.BackgroundState.close
   end
 
   function self:isFlag()
-    return self.currentBackground == Cell.BackgroundState.close
-      and self.currentForeground == Cell.ForegroundState.flag
+    return currentBackground == Cell.BackgroundState.close
+      and currentForeground == Cell.ForegroundState.flag
   end
 
   function self:isClose()
-    return self.currentBackground == Cell.BackgroundState.close
-      and self.currentForeground == Cell.ForegroundState.none
+    return currentBackground == Cell.BackgroundState.close
+      and currentForeground == Cell.ForegroundState.none
   end
 
   function self:isDeadMine()
-    return self.currentBackground == Cell.BackgroundState.dead
-      and self.currentForeground == Cell.ForegroundState.mine
+    return currentBackground == Cell.BackgroundState.dead
+      and currentForeground == Cell.ForegroundState.mine
   end
 
   function self:isEmpty()
-    return self.currentBackground == Cell.BackgroundState.close
-      and self.currentForeground == Cell.ForegroundState.none
+    return currentBackground == Cell.BackgroundState.close
+      and currentForeground == Cell.ForegroundState.none
       and self.isMine == false 
       and self.number == Cell.ForegroundState.none
   end
-
-  --function self:isMine()
-  --  return self.isMine
-  --end
 
   return self
 end

@@ -1,48 +1,37 @@
--- authors: dualizm
--- version: 0.0.1
 assets = require("assets/assets")
 
+local Game = require("game")
+local States = require("states")
 local Cell = require("cell")
-local Field = require("field")
-local ModeMinesweeper = require("mode")
 
-local gameMode = ModeMinesweeper.Status.expert
-local fieldWidth, fieldHeight = Field.sizeFromMode(gameMode)
-local gameWidth = fieldWidth * Cell.cellSize
-local gameHeight = fieldHeight * Cell.cellSize
-
-local padding = 50
+local gameMode = States.GameMode.intermediate
 
 function love.load()
-  Field.load()
-
-  love.graphics.setBackgroundColor(0.24, 0.24, 0.24)
-  love.window.setMode(gameWidth + 2 * padding, gameHeight + 2 * padding)
-  love.window.setTitle("Minesweeper")
+  Game.load()
 
   font = love.graphics.newFont(30)
   love.graphics.setFont(font)
-  textHeight = love.graphics.getFont():getHeight()
-  textY = gameHeight / 2 - textHeight / 2
 
-  field = Field.new(gameMode)
+  game = Game.new(gameMode)
+
+  love.graphics.setBackgroundColor(0.24, 0.24, 0.24)
+  love.window.setMode(game.field.width * Cell.cellSize, game.field.height * Cell.cellSize)
 end
 
 --function love.update(dt)
 --end
 
 function love.draw()
-  love.graphics.translate(padding, padding)
-  field:draw()
-  love.graphics.origin()
+  game.field:draw()
+  local width, height = love.graphics.getDimensions()
 
-  if field.gameStatus == Field.GameStatus.dead then
+  if game.field.gameStatus == States.GameStatus.dead then
     love.graphics.setColor(1, 0, 0)
-    love.graphics.printf("You died!\nPress 'r' to restart...", 0, textY, gameWidth, "center")
+    love.graphics.print("You died!", width/2, height/2)
     love.graphics.setColor(1, 1, 1)
-  elseif field.gameStatus == Field.GameStatus.win then
+  elseif game.field.gameStatus == States.GameStatus.win then
     love.graphics.setColor(0, 1, 0)
-    love.graphics.printf("You win!\nPress 'r' to restart...", 0, textY, gameWidth, "center")
+    love.graphics.print("You win!", width/2, height/2)
     love.graphics.setColor(1, 1, 1)
   end
 end
@@ -51,12 +40,12 @@ end
 --end
 
 function love.mousepressed(x, y, button)
-  field:mousepressed(x - padding, y - padding, button)
+  game.field:mousepressed(x, y, button)
 end
 
 function love.keypressed(key)
   if key == "r" then
-    field = Field.new(gameMode)
+    game = Game.new(gameMode)
   end
 end
 
