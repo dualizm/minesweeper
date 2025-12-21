@@ -11,8 +11,19 @@ Minesweeper by sdl2
 
 # Play web
 
----
+https://dualizm.github.io/minesweeper/
 
 # Install desktop
 
 ---
+
+# Source build
+
+```sh
+mkdir build
+cd build
+cmake ..
+make
+```
+
+Deps: SDL2, SDL2_ttf, cmake, make
