@@ -1178,12 +1178,17 @@ void handle_events(Field *field, GameHeader *header) {
       g_game_loop = false;
     } else if (event.type == SDL_KEYUP) {
       switch (event.key.keysym.sym) {
+#ifndef __EMSCRIPTEN__
       case SDLK_q:
         g_game_loop = false;
         break;
+#endif
       case SDLK_r:
         field_restart(field);
         break;
+      case SDLK_n:
+	button_game_mode_handle_click(field);
+	break;
       }
     } else {
       if (g_game_status == GAME_STATUS_PROGRESS ||
