@@ -1,0 +1,6 @@
+/*.wasm
+  Content-Type: application/wasm
+  Content-Type: application/octet-stream
+
+/*.data
+  Content-Type: application/octet-stream
