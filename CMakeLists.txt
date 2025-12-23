@@ -18,7 +18,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         --preload-file ${CMAKE_SOURCE_DIR}/assets@/assets \
         --use-preload-plugins \
         -s WASM=1 \
-        -s SINGLE_FILE=1 \
         -o ${PROJECT_NAME}.html")
 
     add_executable(${PROJECT_NAME}
