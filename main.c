@@ -27,7 +27,6 @@
    - Добавить статистику игры?
      -> Добавить сохранения в файл с пользователями и статистикой
    - Портировать под android
-     -> Сделать отметку флажков через зажатие левой кнопки
    - Портировать под linux
    - Портировать под windows
    - Портировать под macos
@@ -51,6 +50,7 @@
 #define BUTTON_QUIT_WIDTH 50
 #define CELL_SIZE 24
 
+#define LONG_PRESS_DURATION 200u // 0.2
 #define ANIMATION_DURATION 88u
 
 typedef enum {
@@ -163,6 +163,7 @@ typedef struct {
   CellForegroundState foreground;
   bool is_mine;
   bool is_pressed;
+  bool is_holding_press;
 } Cell;
 
 static inline void cell_init(Cell *cell, int x, int y) {
@@ -173,6 +174,7 @@ static inline void cell_init(Cell *cell, int x, int y) {
   cell->foreground = CELL_FOREGROUND_NONE;
   cell->is_mine = false;
   cell->is_pressed = false;
+  cell->is_holding_press = false;
 }
 
 static inline bool cell_is_close(Cell *cell);
@@ -196,7 +198,13 @@ void cell_draw(Cell *cell) {
   SDL_RenderCopy(g_renderer, texture_cell_back, &back_src_rect, &dst_rect);
 
   if (!draw_as_pressed || cell->background != CELL_BACKGROND_OPEN) {
-    if (cell->foreground != CELL_FOREGROUND_NONE) {
+    if (cell->is_holding_press) {
+      SDL_Rect temp_flag_src_rect = {(CELL_FOREGROUND_FLAG - 1) * CELL_SIZE, 0,
+				     CELL_SIZE, CELL_SIZE};
+      SDL_SetTextureAlphaMod(texture_cell_front, 128); // Полупрозрачный флаг
+      SDL_RenderCopy(g_renderer, texture_cell_front, &temp_flag_src_rect, &dst_rect);
+      SDL_SetTextureAlphaMod(texture_cell_front, 255); // Возвращаем прозрачность
+    } else if (cell->foreground != CELL_FOREGROUND_NONE) {
       SDL_Rect fore_src_rect = {(cell->foreground - 1) * CELL_SIZE, 0,
                                 CELL_SIZE, CELL_SIZE};
       SDL_RenderCopy(g_renderer, texture_cell_front, &fore_src_rect, &dst_rect);
@@ -275,7 +283,9 @@ static inline bool cell_is_empty(Cell *cell) {
 typedef struct {
   int pressed_cell_x;
   int pressed_cell_y;
-  int pressed_start_time;
+  Uint32 pressed_start_time;
+  bool is_pressed_active;
+  bool is_pressed_complete;
   bool left_down;
   bool right_down;
 } MouseState;
@@ -341,6 +351,8 @@ void field_init(Field *field) {
   field->mouse_state.right_down = false;
   field->mouse_state.pressed_cell_x = -1;
   field->mouse_state.pressed_cell_y = -1;
+  field->mouse_state.is_pressed_active = false;
+  field->mouse_state.is_pressed_complete = false;
   field->mouse_state.pressed_start_time = 0;
 
   field->field_state.is_accord_animating = false;
@@ -358,12 +370,15 @@ void field_reset_mouse_state(Field *field) {
   field->mouse_state.right_down = false;
   field->mouse_state.pressed_cell_x = -1;
   field->mouse_state.pressed_cell_y = -1;
+  field->mouse_state.is_pressed_active = false;
+  field->mouse_state.is_pressed_complete = false;  
   field->mouse_state.pressed_start_time = 0;
-
+  
   if (!field->field_state.is_accord_animating) {
     for (int y = 0; y < field->rect.h; y++) {
       for (int x = 0; x < field->rect.w; x++) {
         field->cells[y][x].is_pressed = false;
+	field->cells[y][x].is_holding_press = false;
       }
     }
   }
@@ -478,7 +493,7 @@ static inline void field_visit_to_open(Field *field, Cell *cell) {
   cell_to_open(cell);
 }
 
-int field_count_flags_around(Field *field, int x, int y) {
+static inline int field_count_flags_around(Field *field, int x, int y) {
   int count = 0;
 
   for (int i = y - 1; i < y + 2; i++) {
@@ -501,7 +516,7 @@ int field_count_flags_around(Field *field, int x, int y) {
   return count;
 }
 
-bool field_is_dead_accord(Field *field, int x, int y) {
+static inline bool field_is_dead_accord(Field *field, int x, int y) {
   for (int i = y - 1; i < y + 2; i++) {
     for (int j = x - 1; j < x + 2; j++) {
       if (field_check_borders(field, j, i)) {
@@ -522,7 +537,7 @@ bool field_is_dead_accord(Field *field, int x, int y) {
   return false;
 }
 
-void field_reveal_around(Field *field, int x, int y) {
+static inline void field_reveal_around(Field *field, int x, int y) {
   int stack_x[256] = {0};
   int stack_y[256] = {0};
   int stack_top = 0;
@@ -650,29 +665,52 @@ void field_complete_accord_animation(Field *field, int center_x, int center_y) {
   }
 }
 
-void field_accord(Field *field, int x, int y) {
-  Cell *center_cell = &field->cells[y][x];
+void field_accord(Field *field, int center_x, int center_y) {
+  Cell *cell = &field->cells[center_y][center_x];
 
-  if (center_cell->number == 0) {
+  if (cell->number == 0) {
     return;
   }
 
-  int flags_count = field_count_flags_around(field, x, y);
-  if (flags_count > 0 && cell_is_open(center_cell)) {
-    field_start_accord_animation(field, x, y);
+  int flags_count = field_count_flags_around(field, center_x, center_y);
+  if (flags_count > 0 && cell_is_open(cell)) {
+    field_start_accord_animation(field, center_x, center_y);
     field->field_state.is_accord_animating = true;
-    field->field_state.accord_center_x = x;
-    field->field_state.accord_center_y = y;
+    field->field_state.accord_center_x = center_x;
+    field->field_state.accord_center_y = center_y;
     field->field_state.accord_animation_start_time = SDL_GetTicks();
   }
 }
 
-void field_update_animation(Field *field) {
-  if (field->field_state.is_accord_animating) {
-    Uint32 current_time = SDL_GetTicks();
-    Uint32 elapsed =
-        current_time - field->field_state.accord_animation_start_time;
+void field_complete_pressed_cell(Field *field) {
+  Cell *cell =
+    &field->cells[field->mouse_state.pressed_cell_y][field->mouse_state.pressed_cell_x];
+  if (cell_is_close(cell)) {
+    cell_to_flag(cell);
+  } else if (cell_is_flag(cell)) {
+    cell_to_close(cell);
+  }
+}
 
+void field_update(Field *field) {
+  Uint32 current_time = SDL_GetTicks();
+  
+  if (field->mouse_state.is_pressed_active &&
+      !field->mouse_state.is_pressed_complete &&
+      g_game_status == GAME_STATUS_PROGRESS) {
+    Uint32 elapsed =
+      current_time - field->mouse_state.pressed_start_time;
+    
+    if (elapsed >= LONG_PRESS_DURATION) {
+      field->mouse_state.is_pressed_complete = true;
+      Cell *cell =
+	&field->cells[field->mouse_state.pressed_cell_y][field->mouse_state.pressed_cell_x];
+      cell->is_holding_press = true;
+    }
+  } else if (field->field_state.is_accord_animating) {
+    Uint32 elapsed =
+      current_time - field->field_state.accord_animation_start_time;
+    
     if (elapsed >= ANIMATION_DURATION) {
       field_complete_accord_animation(field, field->field_state.accord_center_x,
                                       field->field_state.accord_center_y);
@@ -751,6 +789,10 @@ void field_handle_event(Field *field, SDL_Event *event) {
       field->mouse_state.left_down = true;
       field->mouse_state.pressed_cell_x = cx;
       field->mouse_state.pressed_cell_y = cy;
+      if (cell_is_close(cell) || cell_is_flag(cell)) {
+	field->mouse_state.pressed_start_time = SDL_GetTicks();
+	field->mouse_state.is_pressed_active = true;
+      }
       cell->is_pressed = true;
     } else if (event->button.button == SDL_BUTTON_RIGHT) {
       if (cell_is_close(cell) || cell_is_flag(cell)) {
@@ -789,6 +831,13 @@ void field_handle_event(Field *field, SDL_Event *event) {
 
     // Обрабатываем клик только если отпустили на той же клетке
     if (same_cell && event->button.button == SDL_BUTTON_LEFT) {
+      // Проверяем не было ли это долгое нажатие для флага
+      if (field->mouse_state.is_pressed_complete) {
+	field_complete_pressed_cell(field);
+	field_reset_mouse_state(field);
+	return;
+      }
+      
       field_handle_left_click(field, cx, cy);
     } else if (event->button.button == SDL_BUTTON_RIGHT) {
       field_handle_right_click(field, cx, cy);
@@ -1205,7 +1254,6 @@ void handle_events(Field *field, GameHeader *header) {
   }
 }
 
-#ifdef __EMSCRIPTEN__
 typedef struct {
   Field *field;
   GameHeader *header;
@@ -1216,19 +1264,21 @@ typedef struct {
 
 LoopArgs *game_args = NULL;
 
+#ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
-void game_loop(void) {
+#endif
+void game_logic(void) {
   game_args->frame_start = SDL_GetTicks();
   
   handle_events(game_args->field, game_args->header);
   
-  field_update_animation(game_args->field);
+  field_update(game_args->field);
   
   // Фон
   SDL_SetRenderDrawColor(g_renderer, BACKGROUND_COLOR, 0xFF);
   SDL_RenderClear(g_renderer);
   
-    // Поле
+  // Поле
   field_draw(game_args->field);
   
   // Шапка
@@ -1246,22 +1296,22 @@ void game_loop(void) {
       (SDL_GetTicks() - game_args->field->start_game_time) / 1000;
   }
 }
-#endif
 
 int main(int argc, const char *argv[]) {
   (void)argc;
   (void)argv;
+  
   bool graphics_status = graphics_init();
   if (!graphics_status) {
     return EXIT_FAILURE;
   }
   
   resources_init();
-
+  
   Uint32 const frame_delay = 1000 / g_fps;
   Uint32 frame_start = 0;
   Uint32 frame_time = 0;
-
+  
   Field field;
   GameHeader header;
   game_header_init(&header, &field, (SDL_Point){20, 60});
@@ -1269,8 +1319,7 @@ int main(int argc, const char *argv[]) {
   g_game_loop = true;
   g_game_status = GAME_STATUS_START;
   srand((unsigned int)SDL_GetTicks());
-
-#ifdef __EMSCRIPTEN__
+  
   LoopArgs args = {
     .frame_delay = frame_delay,
     .frame_start = frame_start,
@@ -1279,39 +1328,17 @@ int main(int argc, const char *argv[]) {
     .header = &header
   };
   game_args = &args;
-  emscripten_set_main_loop(game_loop, -1, 1);
+  
+#ifdef __EMSCRIPTEN__
+  emscripten_set_main_loop(game_logic, -1, 1);
 #else
   while (g_game_loop) {
-    frame_start = SDL_GetTicks();
-
-    handle_events(&field, &header);
-
-    field_update_animation(&field);
-
-    // Фон
-    SDL_SetRenderDrawColor(g_renderer, BACKGROUND_COLOR, 0xFF);
-    SDL_RenderClear(g_renderer);
-
-    // Поле
-    field_draw(&field);
-
-    // Шапка
-    game_header_draw(&header, &field);
-
-    SDL_RenderPresent(g_renderer);
-    frame_time = SDL_GetTicks() - frame_start;
-    if (frame_delay > frame_time) {
-      SDL_Delay(frame_delay - frame_time);
-    }
-
-    if (g_game_status == GAME_STATUS_PROGRESS &&
-        field.current_game_time < 999) {
-      field.current_game_time = (SDL_GetTicks() - field.start_game_time) / 1000;
-    }
+    game_logic();
   }
 #endif
-  
+
   resources_free();
   grahics_free();
+  
   return EXIT_SUCCESS;
 }
