@@ -1,10 +1,10 @@
-/*
-  Project: Minesweeper
-  Version: 1.0.0
-  Author: dualizm
-  Homepage: https://github.com/dualizm/minesweeper.git
- */
-   
+/* =====================================================================================
+ * Project: Minesweeper
+ * Version: 1.0.2
+ * Author: dualizm
+ * License: Apache License 2.0
+ * Homepage: https://github.com/dualizm/minesweeper.git
+ ===================================================================================== */
 
 #include <math.h>
 #include <stdbool.h>
@@ -12,9 +12,6 @@
 #include <stdlib.h>
 
 #include <SDL2/SDL.h>
-#include <SDL2/SDL_events.h>
-#include <SDL2/SDL_mouse.h>
-#include <SDL2/SDL_surface.h>
 #include <SDL2/SDL_ttf.h>
 
 #ifdef __EMSCRIPTEN__
@@ -41,13 +38,7 @@
 #define BACKGROUND_COLOR 0x38, 0x38, 0x38
 #define MAX_FIELD_WIDTH 16
 #define MAX_FIELD_HEIGHT 30
-#define BUTTON_GAME_MODE_HEIGHT 50
-#define BUTTON_GAME_MODE_WIDTH 50
-#define BUTTON_GAME_STATUS_HEIGHT 50
-#define BUTTON_GAME_STATUS_WIDTH 50
-#define TIMER_ICON_SIZE 50
-#define BUTTON_QUIT_HEIGHT 50
-#define BUTTON_QUIT_WIDTH 50
+#define BUTTON_SIZE 50
 #define CELL_SIZE 24
 
 #define LONG_PRESS_DURATION 200u // 0.2
@@ -89,24 +80,24 @@ typedef enum {
 // begginer - w = 550, h = 300
 // intermediate - w = 550, h = 500
 // expert - w = 550, h = 800
-static int g_screen_width = 550;
-static int g_screen_height = 300;
-static int g_fps = 60;
+static Uint16 g_screen_width = 550;
+static Uint16 g_screen_height = 300;
+static Uint16 g_fps = 60;
 static bool g_game_loop = false;
 static GameStatus g_game_status = GAME_STATUS_START;
 static GameMode g_game_mode = GAME_MODE_BEGGINER;
 static SDL_Window *g_window = NULL;
 static SDL_Renderer *g_renderer = NULL;
-static TTF_Font *font = NULL;
+static TTF_Font *g_font = NULL;
 
-static SDL_Texture *texture_button_status_mode = NULL;
-static SDL_Texture *texture_button_game_mode = NULL;
-static SDL_Texture *texture_cell_front = NULL;
-static SDL_Texture *texture_cell_back = NULL;
-static SDL_Texture *texture_timer = NULL;
+static SDL_Texture *g_texture_button_status_mode = NULL;
+static SDL_Texture *g_texture_button_game_mode = NULL;
+static SDL_Texture *g_texture_cell_front = NULL;
+static SDL_Texture *g_texture_cell_back = NULL;
+static SDL_Texture *g_texture_timer = NULL;
 
 #ifndef __EMSCRIPTEN__
-static SDL_Texture *texture_quit = NULL;
+static SDL_Texture *g_texture_quit = NULL;
 #endif
 
 SDL_Surface *load_surface(const char *path) {
@@ -156,9 +147,8 @@ SDL_Texture *renderText(const char *message, TTF_Font *font, SDL_Color color,
 }
 
 typedef struct {
-  int x;
-  int y;
-  int number;
+  SDL_Point position;
+  Uint8 number;
   CellBackgroundState background;
   CellForegroundState foreground;
   bool is_mine;
@@ -167,8 +157,7 @@ typedef struct {
 } Cell;
 
 static inline void cell_init(Cell *cell, int x, int y) {
-  cell->x = x;
-  cell->y = y;
+  cell->position = (SDL_Point){x, y};
   cell->number = 0;
   cell->background = CELL_BACKGROND_CLOSE;
   cell->foreground = CELL_FOREGROUND_NONE;
@@ -180,8 +169,7 @@ static inline void cell_init(Cell *cell, int x, int y) {
 static inline bool cell_is_close(Cell *cell);
 
 void cell_draw(Cell *cell) {
-  // Прямоугольник назначения, куда на экране рисовать
-  SDL_Rect dst_rect = {cell->x, cell->y, CELL_SIZE, CELL_SIZE};
+  SDL_Rect dst_rect = {cell->position.x, cell->position.y, CELL_SIZE, CELL_SIZE};
 
   CellBackgroundState draw_background = cell->background;
   bool draw_as_pressed = false;
@@ -191,29 +179,28 @@ void cell_draw(Cell *cell) {
     draw_as_pressed = true;
   }
 
-  // Прямоугольник источника, какую рисовать часть текстуры
   SDL_Rect back_src_rect = {draw_background * CELL_SIZE, 0, CELL_SIZE,
                             CELL_SIZE};
 
-  SDL_RenderCopy(g_renderer, texture_cell_back, &back_src_rect, &dst_rect);
+  SDL_RenderCopy(g_renderer, g_texture_cell_back, &back_src_rect, &dst_rect);
 
   if (!draw_as_pressed || cell->background != CELL_BACKGROND_OPEN) {
     if (cell->is_holding_press) {
       SDL_Rect temp_flag_src_rect = {(CELL_FOREGROUND_FLAG - 1) * CELL_SIZE, 0,
 				     CELL_SIZE, CELL_SIZE};
-      SDL_SetTextureAlphaMod(texture_cell_front, 128); // Полупрозрачный флаг
-      SDL_RenderCopy(g_renderer, texture_cell_front, &temp_flag_src_rect, &dst_rect);
-      SDL_SetTextureAlphaMod(texture_cell_front, 255); // Возвращаем прозрачность
+      SDL_SetTextureAlphaMod(g_texture_cell_front, 128); // Полупрозрачный флаг
+      SDL_RenderCopy(g_renderer, g_texture_cell_front, &temp_flag_src_rect, &dst_rect);
+      SDL_SetTextureAlphaMod(g_texture_cell_front, 255); // Возвращаем прозрачность
     } else if (cell->foreground != CELL_FOREGROUND_NONE) {
       SDL_Rect fore_src_rect = {(cell->foreground - 1) * CELL_SIZE, 0,
                                 CELL_SIZE, CELL_SIZE};
-      SDL_RenderCopy(g_renderer, texture_cell_front, &fore_src_rect, &dst_rect);
+      SDL_RenderCopy(g_renderer, g_texture_cell_front, &fore_src_rect, &dst_rect);
     }
   }
 }
 
 /*
- * Функции состояния.
+ * Функции состояния
  */
 static inline void cell_to_dead_mine(Cell *cell) {
   cell->background = CELL_BACKGROND_DEAD;
@@ -281,8 +268,7 @@ static inline bool cell_is_empty(Cell *cell) {
 }
 
 typedef struct {
-  int pressed_cell_x;
-  int pressed_cell_y;
+  SDL_Point pressed_cell_position;
   Uint32 pressed_start_time;
   bool is_pressed_active;
   bool is_pressed_complete;
@@ -291,9 +277,8 @@ typedef struct {
 } MouseState;
 
 typedef struct {
-  int accord_center_x;
-  int accord_center_y;
-  int accord_animation_start_time;
+  SDL_Point accord_center_position;
+  Uint32 accord_animation_start_time;
   bool is_accord_animating;
 } FieldState;
 
@@ -301,14 +286,23 @@ typedef struct field {
   MouseState mouse_state;
   FieldState field_state;
   SDL_Rect rect;
-  int total_mines_count;
-  int mines_count;
-  int visited_to_win_count;
-  int visited_cells;
+  Uint8 total_mines_count;
+  Uint8 mines_count;
+  Uint8 visited_to_win_count;
+  Uint8 visited_cells;
   Uint32 current_game_time;
   Uint32 start_game_time;
   Cell cells[MAX_FIELD_HEIGHT][MAX_FIELD_WIDTH];
 } Field;
+
+static inline void field_init_mouse_state(Field *field) {
+  field->mouse_state.left_down = false;
+  field->mouse_state.right_down = false;
+  field->mouse_state.pressed_cell_position = (SDL_Point){0, 0};
+  field->mouse_state.is_pressed_active = false;
+  field->mouse_state.is_pressed_complete = false;
+  field->mouse_state.pressed_start_time = 0;
+}
 
 void field_init(Field *field) {
   // game mode field
@@ -343,36 +337,24 @@ void field_init(Field *field) {
   for (int y = 0; y < field->rect.h; y++) {
     for (int x = 0; x < field->rect.w; x++) {
       cell_init(&field->cells[y][x], field->rect.x + x * CELL_SIZE,
-                field->rect.y + y * CELL_SIZE);
+		field->rect.y + y * CELL_SIZE);
     }
   }
 
-  field->mouse_state.left_down = false;
-  field->mouse_state.right_down = false;
-  field->mouse_state.pressed_cell_x = -1;
-  field->mouse_state.pressed_cell_y = -1;
-  field->mouse_state.is_pressed_active = false;
-  field->mouse_state.is_pressed_complete = false;
-  field->mouse_state.pressed_start_time = 0;
-
+  field_init_mouse_state(field);
+  
   field->field_state.is_accord_animating = false;
-  field->field_state.accord_center_x = -1;
-  field->field_state.accord_center_y = -1;
+  field->field_state.accord_center_position = (SDL_Point){0, 0};
   field->field_state.accord_animation_start_time = 0;
 }
 
 static inline bool field_check_borders(Field *field, int x, int y) {
-  return x < 0 || x >= field->rect.w || y < 0 || y >= field->rect.h;
+  return x < 0 || x >= field->rect.w ||
+         y < 0 || y >= field->rect.h;
 }
 
 void field_reset_mouse_state(Field *field) {
-  field->mouse_state.left_down = false;
-  field->mouse_state.right_down = false;
-  field->mouse_state.pressed_cell_x = -1;
-  field->mouse_state.pressed_cell_y = -1;
-  field->mouse_state.is_pressed_active = false;
-  field->mouse_state.is_pressed_complete = false;  
-  field->mouse_state.pressed_start_time = 0;
+  field_init_mouse_state(field);
   
   if (!field->field_state.is_accord_animating) {
     for (int y = 0; y < field->rect.h; y++) {
@@ -389,14 +371,14 @@ static inline void field_restart(Field *field) {
   g_game_status = GAME_STATUS_START;
 }
 
-void field_init_mines(Field *field, int cx, int cy) {
-  int mines_places = 0;
+void field_init_mines(Field *field, int start_x, int start_y) {
+  Uint8 mines_places = 0;
 
   while (mines_places < field->mines_count) {
-    int x = rand() % field->rect.w;
-    int y = rand() % field->rect.h;
+    Uint8 x = rand() % field->rect.w;
+    Uint8 y = rand() % field->rect.h;
 
-    if (abs(x - cx) <= 1 && abs(y - cy) <= 1) {
+    if (abs(x - start_x) <= 1 && abs(y - start_y) <= 1) {
       continue;
     }
 
@@ -407,16 +389,13 @@ void field_init_mines(Field *field, int cx, int cy) {
   }
 }
 
-int field_count_mines_around(Field *field, int x, int y) {
-  int count = 0;
+Uint8 field_count_mines_around(Field *field, int x, int y) {
+  Uint8 count = 0;
 
   for (int i = y - 1; i < y + 2; i++) {
     for (int j = x - 1; j < x + 2; j++) {
-      if (field_check_borders(field, j, i)) {
-        continue;
-      }
-
-      if (i == y && j == x) {
+      if (field_check_borders(field, j, i) ||
+	  (i == y && j == x)) {
         continue;
       }
 
@@ -435,10 +414,8 @@ void field_init_numbers(Field *field) {
     for (int x = 0; x < field->rect.w; x++) {
       Cell *cell = &field->cells[y][x];
       if (!cell->is_mine) {
-        int mines_count = field_count_mines_around(field, x, y);
-        if (mines_count > 0) {
-          cell->number = mines_count;
-        }
+        Uint8 mines_count = field_count_mines_around(field, x, y);
+	cell->number = mines_count;
       }
     }
   }
@@ -493,16 +470,13 @@ static inline void field_visit_to_open(Field *field, Cell *cell) {
   cell_to_open(cell);
 }
 
-static inline int field_count_flags_around(Field *field, int x, int y) {
-  int count = 0;
+static inline Uint8 field_count_flags_around(Field *field, int x, int y) {
+  Uint8 count = 0;
 
   for (int i = y - 1; i < y + 2; i++) {
     for (int j = x - 1; j < x + 2; j++) {
-      if (field_check_borders(field, j, i)) {
-        continue;
-      }
-
-      if (j == x && i == y) {
+      if (field_check_borders(field, j, i) ||
+	  (j == x && i == y)) {
         continue;
       }
 
@@ -519,11 +493,8 @@ static inline int field_count_flags_around(Field *field, int x, int y) {
 static inline bool field_is_dead_accord(Field *field, int x, int y) {
   for (int i = y - 1; i < y + 2; i++) {
     for (int j = x - 1; j < x + 2; j++) {
-      if (field_check_borders(field, j, i)) {
-        continue;
-      }
-
-      if (i == y && j == x) {
+      if (field_check_borders(field, j, i) ||
+	  (i == y && j == x)) {
         continue;
       }
 
@@ -554,6 +525,7 @@ static inline void field_reveal_around(Field *field, int x, int y) {
     for (int i = current_y - 1; i < current_y + 2; i++) {
       for (int j = current_x - 1; j < current_x + 2; j++) {
         if (field_check_borders(field, j, i)) {
+	  // Проверять центральную клетку?
           continue;
         }
 
@@ -586,10 +558,8 @@ void field_open_around(Field *field, int x, int y) {
 
   for (int i = y - 1; i < y + 2; i++) {
     for (int j = x - 1; j < x + 2; j++) {
-      if (field_check_borders(field, j, i)) {
-        continue;
-      }
-      if (i == y && j == x) {
+      if (field_check_borders(field, j, i) ||
+	  (i == y && j == x)) {
         continue;
       }
 
@@ -621,22 +591,22 @@ void field_open_around(Field *field, int x, int y) {
   }
 }
 
-void field_start_accord_animation(Field *field, int center_x, int center_y) {
-  // Сброс всех анимаций
+static inline void field_reset_cells_pressed(Field *field) {
   for (int y = 0; y < field->rect.h; y++) {
     for (int x = 0; x < field->rect.w; x++) {
       field->cells[y][x].is_pressed = false;
     }
   }
+}
+
+void field_start_accord_animation(Field *field, int x, int y) {
+  field_reset_cells_pressed(field);
 
   // is_pressed для всех клеток вокруг
-  for (int i = center_y - 1; i < center_y + 2; i++) {
-    for (int j = center_x - 1; j < center_x + 2; j++) {
-      if (field_check_borders(field, j, i)) {
-        continue;
-      }
-
-      if (i == center_y && j == center_x) {
+  for (int i = y - 1; i < y + 2; i++) {
+    for (int j = x - 1; j < x + 2; j++) {
+      if (field_check_borders(field, j, i) ||
+	  (i == y && j == x)) {
         continue;
       }
 
@@ -650,41 +620,36 @@ void field_start_accord_animation(Field *field, int center_x, int center_y) {
   }
 }
 
-void field_complete_accord_animation(Field *field, int center_x, int center_y) {
-  // Сбросить все состояния нажатия
-  for (int y = 0; y < field->rect.h; y++) {
-    for (int x = 0; x < field->rect.w; x++) {
-      field->cells[y][x].is_pressed = false;
-    }
-  }
+void field_complete_accord_animation(Field *field, int x, int y) {
+  field_reset_cells_pressed(field);
 
-  int flags_count = field_count_flags_around(field, center_x, center_y);
-  Cell *cell = &field->cells[center_y][center_x];
+  Uint8 flags_count = field_count_flags_around(field, x, y);
+  Cell *cell = &field->cells[y][x];
   if (cell->number == flags_count) {
-    field_open_around(field, center_x, center_y);
+    field_open_around(field, x, y);
   }
 }
 
-void field_accord(Field *field, int center_x, int center_y) {
-  Cell *cell = &field->cells[center_y][center_x];
+void field_accord(Field *field, int x, int y) {
+  Cell *cell = &field->cells[y][x];
 
   if (cell->number == 0) {
     return;
   }
 
-  int flags_count = field_count_flags_around(field, center_x, center_y);
+  Uint8 flags_count = field_count_flags_around(field, x, y);
   if (flags_count > 0 && cell_is_open(cell)) {
-    field_start_accord_animation(field, center_x, center_y);
+    field_start_accord_animation(field, x, y);
     field->field_state.is_accord_animating = true;
-    field->field_state.accord_center_x = center_x;
-    field->field_state.accord_center_y = center_y;
+    field->field_state.accord_center_position = (SDL_Point){x, y};
     field->field_state.accord_animation_start_time = SDL_GetTicks();
   }
 }
 
 void field_complete_pressed_cell(Field *field) {
   Cell *cell =
-    &field->cells[field->mouse_state.pressed_cell_y][field->mouse_state.pressed_cell_x];
+    &field->cells[field->mouse_state.pressed_cell_position.y]
+                 [field->mouse_state.pressed_cell_position.x];
   if (cell_is_close(cell)) {
     cell_to_flag(cell);
   } else if (cell_is_flag(cell)) {
@@ -704,7 +669,8 @@ void field_update(Field *field) {
     if (elapsed >= LONG_PRESS_DURATION) {
       field->mouse_state.is_pressed_complete = true;
       Cell *cell =
-	&field->cells[field->mouse_state.pressed_cell_y][field->mouse_state.pressed_cell_x];
+	&field->cells[field->mouse_state.pressed_cell_position.y]
+	             [field->mouse_state.pressed_cell_position.x];
       cell->is_holding_press = true;
     }
   } else if (field->field_state.is_accord_animating) {
@@ -712,15 +678,15 @@ void field_update(Field *field) {
       current_time - field->field_state.accord_animation_start_time;
     
     if (elapsed >= ANIMATION_DURATION) {
-      field_complete_accord_animation(field, field->field_state.accord_center_x,
-                                      field->field_state.accord_center_y);
+      field_complete_accord_animation(field, field->field_state.accord_center_position.x,
+                                      field->field_state.accord_center_position.y);
       field->field_state.is_accord_animating = false;
     }
   }
 }
 
-void field_handle_left_click(Field *field, int cx, int cy) {
-  Cell *cell = &field->cells[cy][cx];
+void field_handle_left_click(Field *field, int x, int y) {
+  Cell *cell = &field->cells[y][x];
   if (cell_is_flag(cell)) {
     return;
   }
@@ -730,24 +696,24 @@ void field_handle_left_click(Field *field, int cx, int cy) {
     g_game_status = GAME_STATUS_LOSE;
     field_show_all_mines(field);
   } else if (cell_is_number(cell)) {
-    int flags_count = field_count_flags_around(field, cx, cy);
+    Uint8 flags_count = field_count_flags_around(field, x, y);
     if (cell->number == flags_count) {
       field_visit_to_number(field, cell);
-      field_accord(field, cx, cy);
+      field_accord(field, x, y);
     } else {
-      field_accord(field, cx, cy);
+      field_accord(field, x, y);
       field_visit_to_number(field, cell);
     }
   } else if (cell_is_close(cell)) {
     field_visit_to_open(field, cell);
-    field_reveal_around(field, cx, cy);
+    field_reveal_around(field, x, y);
   }
 
   field_check_win(field);
 }
 
-void field_handle_right_click(Field *field, int cx, int cy) {
-  Cell *cell = &field->cells[cy][cx];
+void field_handle_right_click(Field *field, int x, int y) {
+  Cell *cell = &field->cells[y][x];
   if (cell_is_close(cell)) {
     if (field->mines_count > 0) {
       cell_to_flag(cell);
@@ -759,7 +725,7 @@ void field_handle_right_click(Field *field, int cx, int cy) {
   }
 }
 
-bool field_get_mouse_coords(Field *field, int *cx, int *cy) {
+bool field_cell_coords_from_mouse(Field *field, int *cell_x, int *cell_y) {
   int mx = 0;
   int my = 0;
   SDL_GetMouseState(&mx, &my);
@@ -770,8 +736,8 @@ bool field_get_mouse_coords(Field *field, int *cx, int *cy) {
     return false;
   }
 
-  *cx = floor((double)(mx - field->rect.x) / CELL_SIZE);
-  *cy = floor((double)(my - field->rect.y) / CELL_SIZE);
+  *cell_x = floor((double)(mx - field->rect.x) / CELL_SIZE);
+  *cell_y = floor((double)(my - field->rect.y) / CELL_SIZE);
   return true;
 }
 
@@ -779,7 +745,7 @@ void field_handle_event(Field *field, SDL_Event *event) {
   int cx, cy;
 
   if (event->type == SDL_MOUSEBUTTONDOWN) {
-    if (!field_get_mouse_coords(field, &cx, &cy)) {
+    if (!field_cell_coords_from_mouse(field, &cx, &cy)) {
       return;
     }
 
@@ -787,8 +753,7 @@ void field_handle_event(Field *field, SDL_Event *event) {
     field_reset_mouse_state(field);
     if (event->button.button == SDL_BUTTON_LEFT) {
       field->mouse_state.left_down = true;
-      field->mouse_state.pressed_cell_x = cx;
-      field->mouse_state.pressed_cell_y = cy;
+      field->mouse_state.pressed_cell_position = (SDL_Point){cx, cy};
       if (cell_is_close(cell) || cell_is_flag(cell)) {
 	field->mouse_state.pressed_start_time = SDL_GetTicks();
 	field->mouse_state.is_pressed_active = true;
@@ -797,20 +762,19 @@ void field_handle_event(Field *field, SDL_Event *event) {
     } else if (event->button.button == SDL_BUTTON_RIGHT) {
       if (cell_is_close(cell) || cell_is_flag(cell)) {
         field->mouse_state.right_down = true;
-        field->mouse_state.pressed_cell_x = cx;
-        field->mouse_state.pressed_cell_y = cy;
+        field->mouse_state.pressed_cell_position = (SDL_Point){cx, cy};
         cell->is_pressed = true;
       }
     }
   } else if (event->type == SDL_MOUSEBUTTONUP) {
-    if (!field_get_mouse_coords(field, &cx, &cy)) {
+    if (!field_cell_coords_from_mouse(field, &cx, &cy)) {
       field_reset_mouse_state(field);
       return;
     }
 
     // Проверяем, отпустили ли на той же клетке
-    bool same_cell = cx == field->mouse_state.pressed_cell_x &&
-                     cy == field->mouse_state.pressed_cell_y;
+    bool same_cell = cx == field->mouse_state.pressed_cell_position.x &&
+                     cy == field->mouse_state.pressed_cell_position.y;
 
     if (g_game_status == GAME_STATUS_START) {
       if (same_cell && event->button.button == SDL_BUTTON_LEFT) {
@@ -847,13 +811,13 @@ void field_handle_event(Field *field, SDL_Event *event) {
   } else if (event->type == SDL_MOUSEMOTION) {
     // Если кнопка зажата и мышка ушла с клетки, сбрасываем состояние
     if ((field->mouse_state.left_down || field->mouse_state.right_down) &&
-        field->mouse_state.pressed_cell_x >= 0 &&
-        field->mouse_state.pressed_cell_y >= 0) {
+        field->mouse_state.pressed_cell_position.x >= 0 &&
+        field->mouse_state.pressed_cell_position.y >= 0) {
 
-      int current_cx, current_cy;
-      if (!field_get_mouse_coords(field, &current_cx, &current_cy) ||
-          current_cx != field->mouse_state.pressed_cell_x ||
-          current_cy != field->mouse_state.pressed_cell_y) {
+      int current_x, current_y;
+      if (!field_cell_coords_from_mouse(field, &current_x, &current_y) ||
+          current_x != field->mouse_state.pressed_cell_position.x ||
+          current_y != field->mouse_state.pressed_cell_position.y) {
         field_reset_mouse_state(field);
       }
     }
@@ -926,56 +890,60 @@ static inline void button_draw_blocked(SDL_Rect *rect) {
   SDL_RenderFillRect(g_renderer, rect);
 }
 
+static inline void button_draw_pressed(SDL_Rect *rect) {
+  rect->x += 2;
+  rect->y += 2;
+  rect->w -= 4;
+  rect->h -= 4;
+}
+
 typedef struct {
   Button button_game_mode;
   Button button_game_status;
 #ifndef __EMSCRIPTEN__
   Button button_quit;
 #endif
-  SDL_Point pos;
+  SDL_Point position;
 } GameHeader;
 
-void game_header_init(GameHeader *header, Field *field, SDL_Point pos) {
+void game_header_init(GameHeader *header, Field *field, int x, int y) {
 
-  header->pos = (SDL_Point){pos.x, pos.y - BUTTON_GAME_MODE_HEIGHT};
+  header->position = (SDL_Point){x, y - BUTTON_SIZE};
 
   button_init(&header->button_game_mode,
-              (SDL_Rect){.x = header->pos.x,
-                         .y = header->pos.y,
-                         .h = BUTTON_GAME_MODE_HEIGHT,
-                         .w = BUTTON_GAME_MODE_WIDTH},
+              (SDL_Rect){.x = header->position.x,
+                         .y = header->position.y,
+                         .h = BUTTON_SIZE,
+                         .w = BUTTON_SIZE},
               button_game_mode_handle_click, field);
 
   button_init(
       &header->button_game_status,
-      (SDL_Rect){.h = BUTTON_GAME_STATUS_HEIGHT, .w = BUTTON_GAME_STATUS_WIDTH},
+      (SDL_Rect){.h = BUTTON_SIZE, .w = BUTTON_SIZE},
       button_game_status_handle_click, field);
 
 #ifndef __EMSCRIPTEN__
   button_init(
       &header->button_quit,
-      (SDL_Rect){.h = BUTTON_QUIT_HEIGHT, .w = BUTTON_QUIT_WIDTH},
+      (SDL_Rect){.h = BUTTON_SIZE, .w = BUTTON_SIZE},
       button_game_quit_handle_click, NULL);
 #endif
 }
 
 void game_header_draw(GameHeader *header, Field *field) {
   // Рисуем кнопку game_mode
-  SDL_Rect game_mode_src_rect = {.x = g_game_mode * BUTTON_GAME_MODE_WIDTH,
+  SDL_Rect game_mode_src_rect = {.x = g_game_mode * BUTTON_SIZE,
                                  .y = 0,
-                                 .h = BUTTON_GAME_MODE_HEIGHT,
-                                 .w = BUTTON_GAME_MODE_WIDTH};
+                                 .h = BUTTON_SIZE,
+                                 .w = BUTTON_SIZE};
 
   SDL_Rect game_mode_dst_rect = header->button_game_mode.rect;
 
   if (header->button_game_mode.is_pressed) {
-    game_mode_dst_rect.x += 2;
-    game_mode_dst_rect.y += 2;
-    game_mode_dst_rect.w -= 4;
-    game_mode_dst_rect.h -= 4;
+    button_draw_pressed(&game_mode_dst_rect);
   }
 
-  SDL_RenderCopy(g_renderer, texture_button_game_mode, &game_mode_src_rect,
+  SDL_RenderCopy(g_renderer, g_texture_button_game_mode, &game_mode_src_rect,
                  &game_mode_dst_rect);
 
   // Отображаем наведение на кнопку
@@ -992,19 +960,19 @@ void game_header_draw(GameHeader *header, Field *field) {
   SDL_Rect flag_icon_dst_rect = {.x = header->button_game_mode.rect.x +
                                       header->button_game_mode.rect.w + 20,
                                  .y = header->button_game_mode.rect.y,
-                                 .h = BUTTON_GAME_MODE_HEIGHT,
-                                 .w = BUTTON_GAME_MODE_WIDTH};
+                                 .h = BUTTON_SIZE,
+                                 .w = BUTTON_SIZE};
 
   SDL_Rect flag_icon_src_rect = {(CELL_FOREGROUND_FLAG - 1) * CELL_SIZE, 0,
                                  CELL_SIZE, CELL_SIZE};
-  SDL_RenderCopy(g_renderer, texture_cell_front, &flag_icon_src_rect,
+  SDL_RenderCopy(g_renderer, g_texture_cell_front, &flag_icon_src_rect,
                  &flag_icon_dst_rect);
 
   // Рисуем текст для отображения количества флажков
   char count[256] = {0};
   sprintf(count, "%02d", field->mines_count);
   SDL_Texture *count_flags =
-      renderText(count, font, (SDL_Color){0xdb, 0x0d, 0x20, 0xFF}, g_renderer);
+      renderText(count, g_font, (SDL_Color){0xdb, 0x0d, 0x20, 0xFF}, g_renderer);
   int count_flags_size = 48;
   SDL_QueryTexture(count_flags, NULL, NULL, &count_flags_size,
                    &count_flags_size);
@@ -1034,27 +1002,24 @@ void game_header_draw(GameHeader *header, Field *field) {
     game_s = 1;
   }
 
-  SDL_Rect game_status_src_rect = {.x = game_s * BUTTON_GAME_STATUS_WIDTH,
+  SDL_Rect game_status_src_rect = {.x = game_s * BUTTON_SIZE,
                                    .y = 0,
-                                   .h = BUTTON_GAME_STATUS_HEIGHT,
-                                   .w = BUTTON_GAME_STATUS_WIDTH};
+                                   .h = BUTTON_SIZE,
+                                   .w = BUTTON_SIZE};
 
   header->button_game_status.rect =
-      (SDL_Rect){.x = count_flags_dst_rect.x + BUTTON_GAME_STATUS_WIDTH + 20,
+      (SDL_Rect){.x = count_flags_dst_rect.x + BUTTON_SIZE + 20,
                  .y = header->button_game_mode.rect.y,
-                 .h = BUTTON_GAME_STATUS_HEIGHT,
-                 .w = BUTTON_GAME_STATUS_WIDTH};
+                 .h = BUTTON_SIZE,
+                 .w = BUTTON_SIZE};
 
   SDL_Rect game_status_dst_rect = header->button_game_status.rect;
 
   if (header->button_game_status.is_pressed) {
-    game_status_dst_rect.x += 2;
-    game_status_dst_rect.y += 2;
-    game_status_dst_rect.w -= 4;
-    game_status_dst_rect.h -= 4;
+    button_draw_pressed(&game_status_dst_rect);
   }
 
-  SDL_RenderCopy(g_renderer, texture_button_status_mode, &game_status_src_rect,
+  SDL_RenderCopy(g_renderer, g_texture_button_status_mode, &game_status_src_rect,
                  &game_status_dst_rect);
 
   // Отображаем наведение на кнопку
@@ -1065,11 +1030,11 @@ void game_header_draw(GameHeader *header, Field *field) {
   // Рисуем время игры
   SDL_Rect timer_icon_dst_rect = {.x = header->button_game_status.rect.x +
                                        header->button_game_status.rect.w +
-                                       TIMER_ICON_SIZE,
+                                       BUTTON_SIZE,
                                   .y = header->button_game_status.rect.y,
-                                  .w = TIMER_ICON_SIZE,
-                                  .h = TIMER_ICON_SIZE};
-  SDL_RenderCopy(g_renderer, texture_timer, NULL,
+                                  .w = BUTTON_SIZE,
+                                  .h = BUTTON_SIZE};
+  SDL_RenderCopy(g_renderer, g_texture_timer, NULL,
                  &timer_icon_dst_rect);
 
   // Рисуем текст для отображения времени с начала игры до 99
@@ -1077,7 +1042,7 @@ void game_header_draw(GameHeader *header, Field *field) {
   sprintf(times, "%03d", field->current_game_time);
 
   SDL_Texture *time_text =
-      renderText(times, font, (SDL_Color){0xdb, 0x0d, 0x20, 0xFF}, g_renderer);
+      renderText(times, g_font, (SDL_Color){0xdb, 0x0d, 0x20, 0xFF}, g_renderer);
   int time_text_h = 48;
   int time_text_w = 60;
   SDL_QueryTexture(time_text, NULL, NULL, &time_text_h, &time_text_w);
@@ -1090,20 +1055,17 @@ void game_header_draw(GameHeader *header, Field *field) {
 
 #ifndef __EMSCRIPTEN__
   // Рисуем кнопку выхода
-  SDL_Rect quit_button_dst_rect = { .x = text_time_dst_rect.x + BUTTON_QUIT_WIDTH + 20,
+  SDL_Rect quit_button_dst_rect = { .x = text_time_dst_rect.x + BUTTON_SIZE + 20,
                                     .y = header->button_game_status.rect.y,
-                                    .w = BUTTON_QUIT_WIDTH,
-                                    .h = BUTTON_QUIT_HEIGHT};
+                                    .w = BUTTON_SIZE,
+                                    .h = BUTTON_SIZE};
   header->button_quit.rect = quit_button_dst_rect;
 
   if (header->button_quit.is_pressed) {
-    quit_button_dst_rect.x += 2;
-    quit_button_dst_rect.y += 2;
-    quit_button_dst_rect.w -= 4;
-    quit_button_dst_rect.h -= 4;
+    button_draw_pressed(&quit_button_dst_rect);
   }
-
-  SDL_RenderCopy(g_renderer, texture_quit, NULL, &quit_button_dst_rect);
+  
+  SDL_RenderCopy(g_renderer, g_texture_quit, NULL, &quit_button_dst_rect);
 
   if (header->button_quit.is_hover) {
     button_draw_hover(&quit_button_dst_rect);
@@ -1143,6 +1105,8 @@ static inline bool graphics_init(void) {
     return false;
   }
 
+  atexit(SDL_Quit);
+
   g_window = SDL_CreateWindow("Minesweeper", SDL_WINDOWPOS_UNDEFINED,
                               SDL_WINDOWPOS_UNDEFINED, g_screen_width,
                               g_screen_height, SDL_WINDOW_SHOWN);
@@ -1156,8 +1120,10 @@ static inline bool graphics_init(void) {
 
   if (!g_renderer) {
     DISPLAY_ERROR_SDL("renderer could not be created");
+    SDL_DestroyWindow(g_window);
     return false;
   }
+
   // Добавляем прозрачность
   SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
 
@@ -1170,52 +1136,40 @@ static inline bool graphics_init(void) {
     return false;
   }
 
+  atexit(TTF_Quit);
+
   return true;
 }
 
 static inline void grahics_free(void) {
   SDL_DestroyRenderer(g_renderer);
-  g_renderer = NULL;
-
   SDL_DestroyWindow(g_window);
-  g_window = NULL;
-
-  TTF_Quit();
-  SDL_Quit();
 }
 
 static inline void resources_init(void) {
-  texture_cell_back = load_texture("./assets/images/back_cell_2.bmp");
-  texture_cell_front = load_texture("./assets/images/front_cell_2.bmp");
-  texture_button_game_mode =
+  g_texture_cell_back = load_texture("./assets/images/back_cell_2.bmp");
+  g_texture_cell_front = load_texture("./assets/images/front_cell_2.bmp");
+  g_texture_button_game_mode =
       load_texture("./assets/images/game_mode_button.bmp");
-  texture_button_status_mode =
+  g_texture_button_status_mode =
       load_texture("./assets/images/game_status_button.bmp");
-  texture_timer = load_texture("./assets/images/time.bmp");
+  g_texture_timer = load_texture("./assets/images/time.bmp");
 #ifndef __EMSCRIPTEN__
-  texture_quit = load_texture("./assets/images/quit.bmp");
+  g_texture_quit = load_texture("./assets/images/quit.bmp");
 #endif
-  font = load_font("./assets/fonts/PixelifySans-Regular.ttf");
+  g_font = load_font("./assets/fonts/PixelifySans-Regular.ttf");
 }
 
 static inline void resources_free(void) {
-  TTF_CloseFont(font);
-  font = NULL;
-
+  TTF_CloseFont(g_font);
 #ifndef __EMSCRIPTEN__
-  SDL_DestroyTexture(texture_quit);
-  texture_quit = NULL;
+  SDL_DestroyTexture(g_texture_quit);
 #endif
-  SDL_DestroyTexture(texture_timer);
-  texture_timer = NULL;
-  SDL_DestroyTexture(texture_button_status_mode);
-  texture_button_status_mode = NULL;
-  SDL_DestroyTexture(texture_button_game_mode);
-  texture_button_game_mode = NULL;
-  SDL_DestroyTexture(texture_cell_front);
-  texture_cell_front = NULL;
-  SDL_DestroyTexture(texture_cell_back);
-  texture_cell_back = NULL;
+  SDL_DestroyTexture(g_texture_timer);
+  SDL_DestroyTexture(g_texture_button_status_mode);
+  SDL_DestroyTexture(g_texture_button_game_mode);
+  SDL_DestroyTexture(g_texture_cell_front);
+  SDL_DestroyTexture(g_texture_cell_back);
 }
 
 void handle_events(Field *field, GameHeader *header) {
@@ -1314,7 +1268,7 @@ int main(int argc, const char *argv[]) {
   
   Field field;
   GameHeader header;
-  game_header_init(&header, &field, (SDL_Point){20, 60});
+  game_header_init(&header, &field, 20, 60);
   field_init(&field);
   g_game_loop = true;
   g_game_status = GAME_STATUS_START;
