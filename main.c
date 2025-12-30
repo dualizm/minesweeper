@@ -1,6 +1,6 @@
 /* =====================================================================================
  * Project: Minesweeper
- * Version: 1.0.2
+ * Version: 1.0.3
  * Author: dualizm
  * License: Apache License 2.0
  * Homepage: https://github.com/dualizm/minesweeper.git
@@ -36,13 +36,13 @@
   SDL_Log("%s! SDL_Error: %s\n", INFO_TEXT, TTF_GetError());
 
 #define BACKGROUND_COLOR 0x38, 0x38, 0x38
+
 #define MAX_FIELD_WIDTH 16
 #define MAX_FIELD_HEIGHT 30
 #define BUTTON_SIZE 50
 #define CELL_SIZE 24
-
-#define LONG_PRESS_DURATION 200u // 0.2
-#define ANIMATION_DURATION 88u
+#define LONG_PRESS_MS 200u // 0.2
+#define ANIMATION_MS 88u
 
 typedef enum {
   GAME_STATUS_LOSE,
@@ -52,9 +52,10 @@ typedef enum {
 } GameStatus;
 
 typedef enum {
-  CELL_BACKGROND_OPEN,
-  CELL_BACKGROND_CLOSE,
-  CELL_BACKGROND_DEAD,
+  CELL_BACKGROUND_OPEN,
+  CELL_BACKGROUND_CLOSE,
+  CELL_BACKGROUND_DEAD,
+  CELL_BACKGROUND_PRESSED,
 } CellBackgroundState;
 
 typedef enum {
@@ -159,7 +160,7 @@ typedef struct {
 static inline void cell_init(Cell *cell, int x, int y) {
   cell->position = (SDL_Point){x, y};
   cell->number = 0;
-  cell->background = CELL_BACKGROND_CLOSE;
+  cell->background = CELL_BACKGROUND_CLOSE;
   cell->foreground = CELL_FOREGROUND_NONE;
   cell->is_mine = false;
   cell->is_pressed = false;
@@ -175,7 +176,7 @@ void cell_draw(Cell *cell) {
   bool draw_as_pressed = false;
 
   if (cell_is_close(cell) && cell->is_pressed) {
-    draw_background = CELL_BACKGROND_OPEN;
+    draw_background = CELL_BACKGROUND_PRESSED;
     draw_as_pressed = true;
   }
 
@@ -184,7 +185,7 @@ void cell_draw(Cell *cell) {
 
   SDL_RenderCopy(g_renderer, g_texture_cell_back, &back_src_rect, &dst_rect);
 
-  if (!draw_as_pressed || cell->background != CELL_BACKGROND_OPEN) {
+  if (!draw_as_pressed || cell->background != CELL_BACKGROUND_OPEN) {
     if (cell->is_holding_press) {
       SDL_Rect temp_flag_src_rect = {(CELL_FOREGROUND_FLAG - 1) * CELL_SIZE, 0,
 				     CELL_SIZE, CELL_SIZE};
@@ -203,37 +204,37 @@ void cell_draw(Cell *cell) {
  * Функции состояния
  */
 static inline void cell_to_dead_mine(Cell *cell) {
-  cell->background = CELL_BACKGROND_DEAD;
+  cell->background = CELL_BACKGROUND_DEAD;
   cell->foreground = CELL_FOREGROUND_MINE;
 }
 
 static inline void cell_to_dead_flag(Cell *cell) {
-  cell->background = CELL_BACKGROND_DEAD;
+  cell->background = CELL_BACKGROUND_DEAD;
   cell->foreground = CELL_FOREGROUND_FLAG;
 }
 
 static inline void cell_to_number(Cell *cell) {
-  cell->background = CELL_BACKGROND_OPEN;
+  cell->background = CELL_BACKGROUND_OPEN;
   cell->foreground = cell->number;
 }
 
 static inline void cell_to_open(Cell *cell) {
-  cell->background = CELL_BACKGROND_OPEN;
+  cell->background = CELL_BACKGROUND_OPEN;
   cell->foreground = CELL_FOREGROUND_NONE;
 }
 
 static inline void cell_to_mine(Cell *cell) {
-  cell->background = CELL_BACKGROND_CLOSE;
+  cell->background = CELL_BACKGROUND_CLOSE;
   cell->foreground = CELL_FOREGROUND_MINE;
 }
 
 static inline void cell_to_flag(Cell *cell) {
-  cell->background = CELL_BACKGROND_CLOSE;
+  cell->background = CELL_BACKGROUND_CLOSE;
   cell->foreground = CELL_FOREGROUND_FLAG;
 }
 
 static inline void cell_to_close(Cell *cell) {
-  cell->background = CELL_BACKGROND_CLOSE;
+  cell->background = CELL_BACKGROUND_CLOSE;
   cell->foreground = CELL_FOREGROUND_NONE;
 }
 
@@ -243,26 +244,27 @@ static inline void cell_to_close(Cell *cell) {
 static inline bool cell_is_number(Cell *cell) { return cell->number != 0; }
 
 static inline bool cell_is_open(Cell *cell) {
-  return cell->background != CELL_BACKGROND_CLOSE;
+  return cell->background == CELL_BACKGROUND_OPEN &&
+    cell->foreground == CELL_FOREGROUND_NONE;
 }
 
 static inline bool cell_is_flag(Cell *cell) {
-  return cell->background == CELL_BACKGROND_CLOSE &&
+  return cell->background == CELL_BACKGROUND_CLOSE &&
          cell->foreground == CELL_FOREGROUND_FLAG;
 }
 
 static inline bool cell_is_close(Cell *cell) {
-  return cell->background == CELL_BACKGROND_CLOSE &&
+  return cell->background == CELL_BACKGROUND_CLOSE &&
          cell->foreground == CELL_FOREGROUND_NONE;
 }
 
 static inline bool cell_is_dead_mine(Cell *cell) {
-  return cell->background == CELL_BACKGROND_DEAD &&
+  return cell->background == CELL_BACKGROUND_DEAD &&
          cell->foreground == CELL_FOREGROUND_MINE;
 }
 
 static inline bool cell_is_empty(Cell *cell) {
-  return cell->background == CELL_BACKGROND_CLOSE &&
+  return cell->background == CELL_BACKGROUND_CLOSE &&
          cell->foreground == CELL_FOREGROUND_NONE && cell->is_mine == false &&
          cell->number == 0;
 }
@@ -283,16 +285,16 @@ typedef struct {
 } FieldState;
 
 typedef struct field {
+  Cell cells[MAX_FIELD_HEIGHT][MAX_FIELD_WIDTH];
   MouseState mouse_state;
   FieldState field_state;
   SDL_Rect rect;
-  Uint8 total_mines_count;
-  Uint8 mines_count;
-  Uint8 visited_to_win_count;
-  Uint8 visited_cells;
   Uint32 current_game_time;
   Uint32 start_game_time;
-  Cell cells[MAX_FIELD_HEIGHT][MAX_FIELD_WIDTH];
+  Uint16 visited_to_win_count;
+  Uint16 visited_cells;
+  Uint8 total_mines_count;
+  Uint8 mines_count;
 } Field;
 
 static inline void field_init_mouse_state(Field *field) {
@@ -451,20 +453,22 @@ static inline void field_show_all_mines(Field *field) {
       Cell *cell = &field->cells[y][x];
       if (cell->is_mine && !cell_is_flag(cell) && !cell_is_dead_mine(cell)) {
         cell_to_mine(cell);
+      } else if (!cell->is_mine && cell_is_flag(cell)) {
+	cell_to_dead_flag(cell);
       }
     }
   }
 }
 
 static inline void field_visit_to_number(Field *field, Cell *cell) {
-  if (!cell_is_open(cell)) {
+  if (cell_is_close(cell)) {
     field->visited_cells += 1;
   }
   cell_to_number(cell);
 }
 
 static inline void field_visit_to_open(Field *field, Cell *cell) {
-  if (!cell_is_open(cell)) {
+  if (cell_is_close(cell)) {
     field->visited_cells += 1;
   }
   cell_to_open(cell);
@@ -531,7 +535,7 @@ static inline void field_reveal_around(Field *field, int x, int y) {
 
         Cell *cell = &field->cells[i][j];
 
-        if (cell_is_open(cell) || cell_is_flag(cell)) {
+        if (!cell_is_close(cell) || cell_is_flag(cell)) {
           continue;
         }
 
@@ -613,7 +617,7 @@ void field_start_accord_animation(Field *field, int x, int y) {
       Cell *cell = &field->cells[i][j];
 
       // Нажимаем только закрытые клетки без флагов
-      if (!cell_is_open(cell) && !cell_is_flag(cell)) {
+      if (cell_is_close(cell) && !cell_is_flag(cell)) {
         cell->is_pressed = true;
       }
     }
@@ -638,7 +642,7 @@ void field_accord(Field *field, int x, int y) {
   }
 
   Uint8 flags_count = field_count_flags_around(field, x, y);
-  if (flags_count > 0 && cell_is_open(cell)) {
+  if (flags_count > 0 && !cell_is_close(cell)) {
     field_start_accord_animation(field, x, y);
     field->field_state.is_accord_animating = true;
     field->field_state.accord_center_position = (SDL_Point){x, y};
@@ -666,7 +670,7 @@ void field_update(Field *field) {
     Uint32 elapsed =
       current_time - field->mouse_state.pressed_start_time;
     
-    if (elapsed >= LONG_PRESS_DURATION) {
+    if (elapsed >= LONG_PRESS_MS) {
       field->mouse_state.is_pressed_complete = true;
       Cell *cell =
 	&field->cells[field->mouse_state.pressed_cell_position.y]
@@ -677,7 +681,7 @@ void field_update(Field *field) {
     Uint32 elapsed =
       current_time - field->field_state.accord_animation_start_time;
     
-    if (elapsed >= ANIMATION_DURATION) {
+    if (elapsed >= ANIMATION_MS) {
       field_complete_accord_animation(field, field->field_state.accord_center_position.x,
                                       field->field_state.accord_center_position.y);
       field->field_state.is_accord_animating = false;
@@ -687,9 +691,12 @@ void field_update(Field *field) {
 
 void field_handle_left_click(Field *field, int x, int y) {
   Cell *cell = &field->cells[y][x];
-  if (cell_is_flag(cell)) {
+  if (cell_is_flag(cell) || cell_is_open(cell)) {
     return;
   }
+
+  SDL_Log("Field: current time: %d, start time: %d, total mines: %d, mines: %d, visited to win: %d, visited cells: %d\n", field->current_game_time, field->start_game_time,
+	  field->total_mines_count, field->mines_count, field->visited_to_win_count, field->visited_cells);
 
   if (cell->is_mine) {
     cell_to_dead_mine(cell);
