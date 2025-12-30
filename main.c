@@ -695,9 +695,6 @@ void field_handle_left_click(Field *field, int x, int y) {
     return;
   }
 
-  SDL_Log("Field: current time: %d, start time: %d, total mines: %d, mines: %d, visited to win: %d, visited cells: %d\n", field->current_game_time, field->start_game_time,
-	  field->total_mines_count, field->mines_count, field->visited_to_win_count, field->visited_cells);
-
   if (cell->is_mine) {
     cell_to_dead_mine(cell);
     g_game_status = GAME_STATUS_LOSE;
